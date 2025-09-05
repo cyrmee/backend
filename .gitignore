@@ -1,0 +1,30 @@
+# .NET Core
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+*.tmp
+*.temp
+
+# Rider
+.idea/
+
+# Visual Studio
+.vs/
+
+# NuGet
+packages/
+*.nupkg
+
+# Docker
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+appsettings.*.json
