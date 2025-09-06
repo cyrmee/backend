@@ -1,4 +1,4 @@
-using Domain.DTOs.Common;
+using Domain.Models.Common;
 
 namespace Domain.Interfaces;
 

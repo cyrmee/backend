@@ -9,15 +9,15 @@ public static class CodeGenerator
 	/// <param name="name">The name to include in the code.</param>
 	/// <returns>The generated code string.</returns>
 	public static string GenerateCode(string baseCode, string name)
-	{
-		if (string.IsNullOrWhiteSpace(baseCode))
-			throw new ArgumentException("Base code cannot be empty for code generation.");
-		if (string.IsNullOrWhiteSpace(name))
-			throw new ArgumentException("Name cannot be empty for code generation.");
+    {
+        if (string.IsNullOrWhiteSpace(baseCode))
+            throw new ArgumentException("Base code cannot be empty for code generation.");
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Name cannot be empty for code generation.");
 
-		var guid = Guid.NewGuid().ToString("N");
-		var cleanName = name.Replace(" ", string.Empty);
-		var code = $"{baseCode}_{cleanName}_{guid}".ToUpperInvariant();
-		return code;
-	}
+        var guid = Guid.NewGuid().ToString("N");
+        var cleanName = name.Replace(" ", string.Empty);
+        var code = $"{baseCode}_{cleanName}_{guid}".ToUpperInvariant();
+        return code;
+    }
 }

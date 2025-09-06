@@ -1,11 +1,12 @@
-using Domain.DTOs;
+using Domain.Models;
 
 namespace Domain.Interfaces;
 
 public interface IAuthService
 {
-    Task<JwtAuthResponseDto> RegisterAsync(RegisterDto dto);
-    Task<JwtAuthResponseDto> LoginAsync(LoginDto dto);
-    Task<JwtAuthResponseDto> RefreshAccessTokenAsync(string refreshToken);
-    Task LogoutAsync(string? refreshToken, string? userId);
+    Task<JwtAuthResponseModel> RegisterAsync(RegisterModel model);
+    Task<JwtAuthResponseModel> LoginAsync(LoginModel model);
+    Task<JwtAuthResponseModel> RefreshAccessTokenAsync(string refreshToken);
+    Task LogoutAsync(LogoutModel model);
+    Task LogoutAllSessionsAsync(string userId);
 }

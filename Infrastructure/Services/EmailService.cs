@@ -1,8 +1,9 @@
 using Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-public class EmailService() : IEmailService
+public class EmailService(ILogger<EmailService> logger) : IEmailService
 {
     public async Task SendEmailAsync(string to, string subject, string body)
     {
@@ -20,10 +21,10 @@ public class EmailService() : IEmailService
         // - Azure Communication Services
         // etc.
 
-        Console.WriteLine($"Sending email to: {to}");
-        Console.WriteLine($"Subject: {subject}");
-        Console.WriteLine($"Body: {body}");
-        Console.WriteLine($"Is HTML: {isHtml}");
+        logger.LogInformation("Sending email to: {To}", to);
+        logger.LogInformation("Subject: {Subject}", subject);
+        logger.LogInformation("Body: {Body}", body);
+        logger.LogInformation("Is HTML: {IsHtml}", isHtml);
 
         // Simulate async operation
         await Task.Delay(100);

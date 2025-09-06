@@ -1,172 +1,146 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
-using Domain.DTOs;
+using Application.Common;
+using Domain.Constants;
+using Domain.Entities;
+using Domain.Exceptions;
+using Domain.Interfaces;
 using Domain.Models;
 using Domain.Settings;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
-using Domain.Interfaces;
 
 namespace Application.Services;
 
 public class AuthService(
-	UserManager<User> userManager,
-	IOptions<JwtSettings> jwtOptions,
-	ITokenStoreService tokenStore
+    UserManager<User> userManager,
+    IOptions<JwtSettings> jwtOptions,
+    ITokenStoreService tokenStore,
+    IJwtTokenService jwtTokenService,
+    ILogger<AuthService> logger
 ) : IAuthService
 {
-	private readonly JwtSettings _jwt = jwtOptions.Value;
+    private readonly JwtSettings _jwt = jwtOptions.Value;
 
-	public async Task<JwtAuthResponseDto> RegisterAsync(RegisterDto dto)
-	{
-		var existing = await userManager.FindByEmailAsync(dto.Email);
-		if (existing != null)
-			throw new InvalidOperationException("User with this email already exists");
+    public async Task<JwtAuthResponseModel> RegisterAsync(RegisterModel model)
+    {
+        var existing = await userManager.FindByEmailAsync(model.Email);
+        if (existing != null)
+            throw new ConflictException("User with this email already exists");
 
-		var user = new User
-		{
-			UserName = dto.Email,
-			Email = dto.Email,
-		};
-		var result = await userManager.CreateAsync(user, dto.Password);
-		if (!result.Succeeded)
-		{
-			var error = string.Join(", ", result.Errors.Select(e => e.Description));
-			throw new InvalidOperationException($"Failed to register user: {error}");
-		}
+        var user = Mapper.Map<RegisterModel, User>(model);
 
-		await userManager.UpdateAsync(user);
+        var result = await userManager.CreateAsync(user, model.Password);
+        if (!result.Succeeded)
+        {
+            var error = string.Join(", ", result.Errors.Select(e => e.Description));
+            throw new BadRequestException($"Failed to register user: {error}");
+        }
 
-		return await CreateAuthResponseAsync(user);
-	}
+        await userManager.AddToRoleAsync(user, Roles.User);
+        await userManager.UpdateAsync(user);
 
-	public async Task<JwtAuthResponseDto> LoginAsync(LoginDto dto)
-	{
-		var user = await userManager.FindByEmailAsync(dto.Email);
-		if (user == null)
-			throw new UnauthorizedAccessException("Invalid credentials");
+        return await CreateAuthResponseAsync(user);
+    }
 
-		var passwordValid = await userManager.CheckPasswordAsync(user, dto.Password);
-		if (!passwordValid)
-			throw new UnauthorizedAccessException("Invalid credentials");
+    public async Task<JwtAuthResponseModel> LoginAsync(LoginModel model)
+    {
+        var user = await userManager.FindByEmailAsync(model.Email)
+                   ?? throw new UnauthorizedException("Invalid credentials");
 
-		user.LastLoginAt = DateTime.UtcNow;
-		await userManager.UpdateAsync(user);
+        var passwordValid = await userManager.CheckPasswordAsync(user, model.Password);
+        if (!passwordValid)
+            throw new UnauthorizedException("Invalid credentials");
 
-		return await CreateAuthResponseAsync(user);
-	}
+        user.LastLoginAt = DateTime.UtcNow;
+        await userManager.UpdateAsync(user);
 
-	public async Task<JwtAuthResponseDto> RefreshAccessTokenAsync(string refreshToken)
-	{
-		// Validate token and ensure type == refresh and jti exists in Redis
-		var handler = new JwtSecurityTokenHandler();
-		var principal = handler.ValidateToken(refreshToken, new TokenValidationParameters
-		{
-			ValidateIssuerSigningKey = true,
-			IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret)),
-			ValidateIssuer = !string.IsNullOrEmpty(_jwt.Issuer),
-			ValidIssuer = _jwt.Issuer,
-			ValidateAudience = !string.IsNullOrEmpty(_jwt.Audience),
-			ValidAudience = _jwt.Audience,
-			ValidateLifetime = true,
-			ClockSkew = TimeSpan.Zero
-		}, out _);
+        return await CreateAuthResponseAsync(user, model.RememberMe);
+    }
 
-		var type = principal.Claims.FirstOrDefault(c => c.Type == "type")?.Value;
-		var sub = principal.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub || c.Type == ClaimTypes.NameIdentifier)?.Value;
-		var jti = principal.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti || c.Type == "jti")?.Value;
-		if (type != "refresh" || string.IsNullOrEmpty(sub) || string.IsNullOrEmpty(jti))
-			throw new UnauthorizedAccessException("Invalid refresh token");
+    public async Task<JwtAuthResponseModel> RefreshAccessTokenAsync(string refreshToken)
+    {
+        // Validate token and ensure type == refresh and jti exists in Redis
+        var principal = jwtTokenService.ValidateToken(refreshToken, validateLifetime: true);
 
-		var refreshKeyActive = await tokenStore.IsRefreshJtiActiveAsync(sub, jti);
-		if (!refreshKeyActive)
-			throw new UnauthorizedAccessException("Refresh token not found or expired");
+        var type = principal.Claims.FirstOrDefault(c => c.Type == TokenTypes.TokenTypeClaim)?.Value;
+        var sub = principal.Claims
+            .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)?.Value;
+        var jti = principal.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
+        if (type != TokenTypes.Refresh || string.IsNullOrEmpty(sub) || string.IsNullOrEmpty(jti))
+            throw new UnauthorizedException("Invalid refresh token");
 
-		var user = await userManager.FindByIdAsync(sub);
-		if (user == null)
-			throw new UnauthorizedAccessException("User not found");
+        var refreshKeyActive = await tokenStore.IsRefreshJtiActiveAsync(sub, jti);
+        if (!refreshKeyActive)
+            throw new UnauthorizedException("Refresh token not found or expired");
 
-		// rotate refresh token: delete old and create new
-		await tokenStore.RevokeRefreshJtiAsync(sub, jti);
-		return await CreateAuthResponseAsync(user);
-	}
+        var user = await userManager.FindByIdAsync(sub)
+            ?? throw new UnauthorizedException("User not found");
 
-	public async Task LogoutAsync(string? refreshToken, string? userId)
-	{
-		string? sub = userId;
-		if (!string.IsNullOrEmpty(refreshToken))
-		{
-			try
-			{
-				var handler = new JwtSecurityTokenHandler();
-				var decoded = handler.ReadJwtToken(refreshToken);
-				sub = decoded.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub || c.Type == ClaimTypes.NameIdentifier)?.Value ?? sub;
-				var jti = decoded.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti || c.Type == "jti")?.Value;
-				if (!string.IsNullOrEmpty(sub) && !string.IsNullOrEmpty(jti))
-					await tokenStore.RevokeRefreshJtiAsync(sub, jti);
-			}
-			catch { /* ignore */ }
-		}
+        // rotate refresh token: delete old and create new
+        await tokenStore.RevokeRefreshJtiAsync(sub, jti);
+        return await CreateAuthResponseAsync(user);
+    }
 
-		if (!string.IsNullOrEmpty(sub))
-			await tokenStore.RevokeAllForUserAsync(sub);
-	}
+    public async Task LogoutAsync(LogoutModel model)
+    {
+        var sub = model.UserId;
+        if (!string.IsNullOrEmpty(model.RefreshToken))
+            try
+            {
+                var handler = new JwtSecurityTokenHandler();
+                var decoded = handler.ReadJwtToken(model.RefreshToken);
+                sub = decoded.Claims
+                          .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)
+                          ?.Value ??
+                      sub;
+                var jti = decoded.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
+                if (!string.IsNullOrEmpty(sub) && !string.IsNullOrEmpty(jti))
+                    await tokenStore.RevokeRefreshJtiAsync(sub, jti);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error occurred while logging out refresh token");
+            }
 
-	private async Task<JwtAuthResponseDto> CreateAuthResponseAsync(User user)
-	{
-		var accessJti = Guid.NewGuid().ToString("N");
-		var refreshJti = Guid.NewGuid().ToString("N");
+        if (!string.IsNullOrEmpty(model.AccessToken))
+            try
+            {
+                var handler = new JwtSecurityTokenHandler();
+                var decoded = handler.ReadJwtToken(model.AccessToken);
+                sub = decoded.Claims
+                          .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)
+                          ?.Value ??
+                      sub;
+                var jti = decoded.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
+                if (!string.IsNullOrEmpty(sub) && !string.IsNullOrEmpty(jti))
+                    await tokenStore.RevokeAccessJtiAsync(sub, jti);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error occurred while logging out access token");
+            }
+    }
 
-		var accessToken = GenerateToken(user, accessJti, "access", TimeSpan.FromMinutes(_jwt.ExpirationMinutes));
-		var refreshToken = GenerateToken(user, refreshJti, "refresh", TimeSpan.FromDays(_jwt.RefreshTokenExpirationDays));
+    public async Task LogoutAllSessionsAsync(string userId) =>
+        await tokenStore.RevokeAllForUserAsync(userId);
 
-		// store JTIs in redis with TTL
-	await tokenStore.StoreAccessJtiAsync(user.Id, accessJti, TimeSpan.FromMinutes(_jwt.ExpirationMinutes));
-	await tokenStore.StoreRefreshJtiAsync(user.Id, refreshJti, TimeSpan.FromDays(_jwt.RefreshTokenExpirationDays));
+    private async Task<JwtAuthResponseModel> CreateAuthResponseAsync(User user, bool rememberMe = false)
+    {
+        var accessToken = await jwtTokenService.GenerateAccessToken(user);
 
-		var userDto = new AuthUserResponseDto
-		{
-			Id = user.Id,
-			Email = user.Email ?? string.Empty,
-			Name = user.UserName ?? string.Empty,
-			IsActive = true,
-			IsVerified = true,
-		};
+        var refreshDays = rememberMe ? _jwt.RefreshTokenExpirationDays : _jwt.RefreshTokenExpirationDays + 6;
+        var refreshLifetime = TimeSpan.FromDays(refreshDays);
+        var refreshToken = await jwtTokenService.GenerateRefreshToken(user, refreshLifetime);
 
-		return new JwtAuthResponseDto
-		{
-			AccessToken = accessToken,
-			RefreshToken = refreshToken,
-			User = userDto
-		};
-	}
+        var authUserResponse = Mapper.Map<User, UserModel>(user);
 
-	private string GenerateToken(User user, string jti, string type, TimeSpan lifetime)
-	{
-		var claims = new List<Claim>
-		{
-			new(JwtRegisteredClaimNames.Sub, user.Id),
-			new(JwtRegisteredClaimNames.Jti, jti),
-			new("type", type),
-			new(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty),
-			new(ClaimTypes.Name, user.UserName ?? user.Email ?? string.Empty),
-			new("isActive", "true"),
-			new("isVerified", "true"),
-		};
-
-		var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));
-		var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-		var token = new JwtSecurityToken(
-			issuer: string.IsNullOrEmpty(_jwt.Issuer) ? null : _jwt.Issuer,
-			audience: string.IsNullOrEmpty(_jwt.Audience) ? null : _jwt.Audience,
-			claims: claims,
-			expires: DateTime.UtcNow.Add(lifetime),
-			signingCredentials: creds
-		);
-
-		return new JwtSecurityTokenHandler().WriteToken(token);
-	}
+        return new JwtAuthResponseModel
+        {
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            User = authUserResponse
+        };
+    }
 }

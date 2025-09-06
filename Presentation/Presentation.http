@@ -1,6 +1,0 @@
-@Presentation_HostAddress = http://localhost:5239
-
-GET {{Presentation_HostAddress}}/api/AppSettings
-Accept: application/json
-
-###
