@@ -1,5 +1,5 @@
-using Domain.Models;
 using Domain.Models.Common;
+using Domain.Models.User;
 
 namespace Domain.Interfaces;
 

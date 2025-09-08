@@ -1,15 +1,20 @@
 using System.Reflection;
 using Domain.Constants;
 using Domain.Entities.Base;
+using Domain.Settings;
 using Hangfire;
 using Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Application.Jobs;
 
-public class SoftDeleteCleanupJobs(IServiceScopeFactory scopeFactory, ILogger<SoftDeleteCleanupJobs> logger)
+public class SoftDeleteCleanupJobs(
+    IServiceScopeFactory scopeFactory,
+    ILogger<SoftDeleteCleanupJobs> logger,
+    IOptions<SoftDeleteSettings> softDeleteSettings)
 {
     private static List<Type>? _softDeletableTypes;
     private static readonly Lock TypesLock = new();
@@ -22,10 +27,11 @@ public class SoftDeleteCleanupJobs(IServiceScopeFactory scopeFactory, ILogger<So
     public async Task PurgeOldSoftDeletedAsync()
     {
         var started = DateTime.UtcNow;
+        var settings = softDeleteSettings.Value;
         using var scope = scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var threshold = started.AddDays(-15);
-        const int batchSize = 500;
+        var threshold = started.AddDays(-settings.RetentionDays);
+        var batchSize = settings.BatchSize;
 
         // Cache entity types once
         var types = _softDeletableTypes;
@@ -65,8 +71,8 @@ public class SoftDeleteCleanupJobs(IServiceScopeFactory scopeFactory, ILogger<So
             }
 
         logger.LogInformation(
-            "Soft delete purge removed {Count} entities older than 15 days in {ElapsedMs} ms across {TypeCount} types (batchSize={BatchSize})",
-            totalDeleted, (DateTime.UtcNow - started).TotalMilliseconds, types.Count, batchSize);
+            "Soft delete purge removed {Count} entities older than {RetentionDays} days in {ElapsedMs} ms across {TypeCount} types (batchSize={BatchSize})",
+            totalDeleted, settings.RetentionDays, (DateTime.UtcNow - started).TotalMilliseconds, types.Count, batchSize);
     }
 
     // Generic batch purge for a single entity type using ExecuteDelete to avoid materializing entities

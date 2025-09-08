@@ -1,6 +1,6 @@
 using Domain.Models.Common;
 
-namespace Domain.Models;
+namespace Domain.Models.User;
 
 public class UserModel : BaseModel
 {

@@ -17,7 +17,7 @@ public class JwtTokenService(IOptions<JwtSettings> jwtOptions, ITokenStoreServic
     public async Task<string> GenerateAccessToken(User user)
     {
         var jti = Guid.NewGuid().ToString("N");
-        var token = GenerateToken(user, jti, TokenTypes.Access, TimeSpan.FromMinutes(_jwt.ExpirationMinutes));
+        var token = GenerateToken(user, jti, JwtTokenTypes.Access, TimeSpan.FromMinutes(_jwt.ExpirationMinutes));
         await tokenStore.StoreAccessJtiAsync(user.Id.ToString(), jti, TimeSpan.FromMinutes(_jwt.ExpirationMinutes));
         return token;
     }
@@ -25,7 +25,7 @@ public class JwtTokenService(IOptions<JwtSettings> jwtOptions, ITokenStoreServic
     public async Task<string> GenerateRefreshToken(User user, TimeSpan lifetime)
     {
         var jti = Guid.NewGuid().ToString("N");
-        var token = GenerateToken(user, jti, TokenTypes.Refresh, lifetime);
+        var token = GenerateToken(user, jti, JwtTokenTypes.Refresh, lifetime);
         await tokenStore.StoreRefreshJtiAsync(user.Id.ToString(), jti, lifetime);
         return token;
     }
@@ -56,7 +56,7 @@ public class JwtTokenService(IOptions<JwtSettings> jwtOptions, ITokenStoreServic
             new(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty),
             new(ClaimTypes.Name, user.Name ?? string.Empty),
             new(ClaimTypes.NameIdentifier, user.UserName ?? string.Empty),
-            new(TokenTypes.TokenTypeClaim, type)
+            new(JwtTokenTypes.TokenTypeClaim, type)
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));

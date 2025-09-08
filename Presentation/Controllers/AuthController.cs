@@ -3,16 +3,17 @@ using Domain.Models;
 using Domain.Models.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Presentation.Extensions;
 using System.Security.Claims;
+using Domain.Constants;
 
 namespace Presentation.Controllers;
 
 [ApiController]
-[Route("[controller]")]
+[Route("api/[controller]")]
 public class AuthController(
-    IAuthService authService,
-    ILogger<AuthController> logger
+    IAuthService authService
 ) : ControllerBase
 {
     [HttpPost("register")]
@@ -25,6 +26,7 @@ public class AuthController(
 
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimitingPolicies.Login)]
     public async Task<ActionResult<ResponseModel<JwtAuthResponseModel>>> Login([FromBody] LoginModel model)
     {
         var result = await authService.LoginAsync(model);
@@ -45,9 +47,6 @@ public class AuthController(
     {
         model.AccessToken ??= Request.Headers.Authorization.ToString()
             .Replace("Bearer ", "");
-        logger.LogCritical("Refresh Token on Logout: {AccessToken}", model.AccessToken);
-        logger.LogCritical("Refresh Token on Logout: {RefreshToken}", model.RefreshToken);
-        logger.LogCritical("User ID on Logout: {UserId}", model.UserId);
         await authService.LogoutAsync(model);
         var payload = new { message = "Logged out successfully" } as object;
         return payload.ToResponse();

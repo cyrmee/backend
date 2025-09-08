@@ -82,7 +82,7 @@ public static class HangfireExtensions
         {
             var httpContext = context.GetHttpContext();
             if (env.IsDevelopment()) return true;
-            return httpContext.User.Identity?.IsAuthenticated == true && httpContext.User.IsInRole(Roles.Admin);
+            return httpContext.User.Identity?.IsAuthenticated == true && httpContext.User.IsInRole(UserRoles.Admin);
         }
     }
 }

@@ -6,6 +6,7 @@ using Domain.Entities;
 using Domain.Exceptions;
 using Domain.Interfaces;
 using Domain.Models;
+using Domain.Models.User;
 using Domain.Settings;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
@@ -38,7 +39,7 @@ public class AuthService(
             throw new BadRequestException($"Failed to register user: {error}");
         }
 
-        await userManager.AddToRoleAsync(user, Roles.User);
+        await userManager.AddToRoleAsync(user, UserRoles.User);
         await userManager.UpdateAsync(user);
 
         return await CreateAuthResponseAsync(user);
@@ -64,11 +65,11 @@ public class AuthService(
         // Validate token and ensure type == refresh and jti exists in Redis
         var principal = jwtTokenService.ValidateToken(refreshToken, validateLifetime: true);
 
-        var type = principal.Claims.FirstOrDefault(c => c.Type == TokenTypes.TokenTypeClaim)?.Value;
+        var type = principal.Claims.FirstOrDefault(c => c.Type == JwtTokenTypes.TokenTypeClaim)?.Value;
         var sub = principal.Claims
             .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)?.Value;
         var jti = principal.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
-        if (type != TokenTypes.Refresh || string.IsNullOrEmpty(sub) || string.IsNullOrEmpty(jti))
+        if (type != JwtTokenTypes.Refresh || string.IsNullOrEmpty(sub) || string.IsNullOrEmpty(jti))
             throw new UnauthorizedException("Invalid refresh token");
 
         var refreshKeyActive = await tokenStore.IsRefreshJtiActiveAsync(sub, jti);
@@ -130,7 +131,7 @@ public class AuthService(
     {
         var accessToken = await jwtTokenService.GenerateAccessToken(user);
 
-        var refreshDays = rememberMe ? _jwt.RefreshTokenExpirationDays : _jwt.RefreshTokenExpirationDays + 6;
+        var refreshDays = rememberMe ? _jwt.RememberMeRefreshTokenExpirationDays : _jwt.RefreshTokenExpirationDays;
         var refreshLifetime = TimeSpan.FromDays(refreshDays);
         var refreshToken = await jwtTokenService.GenerateRefreshToken(user, refreshLifetime);
 

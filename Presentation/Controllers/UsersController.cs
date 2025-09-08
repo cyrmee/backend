@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using Domain.Exceptions;
 using Domain.Interfaces;
-using Domain.Models;
 using Domain.Models.Common;
+using Domain.Models.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Presentation.Extensions;
@@ -19,13 +19,7 @@ public class UsersController(IUserService userService) : ControllerBase
         CancellationToken cancellationToken)
     {
         var paged = await userService.GetUsersPaginatedAsync(query, cancellationToken);
-        var pagination = new Pagination
-        {
-            Page = paged.PageNumber,
-            PageSize = paged.PageSize,
-            TotalCount = paged.TotalCount
-        };
-        return paged.Data.ToResponse(pagination);
+        return paged.ToResponse();
     }
 
     [HttpGet("{id:guid}")]

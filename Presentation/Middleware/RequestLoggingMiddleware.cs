@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Claims;
 
 namespace Presentation.Middleware;
 
@@ -13,9 +14,32 @@ public class RequestLoggingMiddleware(RequestDelegate next, ILogger<RequestLoggi
         stopwatch.Stop();
         var elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
 
-        logger.LogInformation("Request {Method} {Path} executed in {ElapsedMilliseconds}ms",
-            context.Request.Method,
-            context.Request.Path,
-            elapsedMilliseconds);
+        var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
+                    context.User.FindFirst("sub")?.Value ??
+                    "anonymous";
+
+        var requestId = context.TraceIdentifier;
+        var statusCode = context.Response.StatusCode;
+        var method = context.Request.Method;
+        var path = context.Request.Path.ToString();
+        var queryString = context.Request.QueryString.ToString();
+        var userAgent = context.Request.Headers.UserAgent.ToString();
+        var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        logger.LogInformation(
+            "HTTP Request completed {@RequestDetails}",
+            new
+            {
+                RequestId = requestId,
+                UserId = userId,
+                Method = method,
+                Path = path,
+                QueryString = queryString,
+                StatusCode = statusCode,
+                ElapsedMilliseconds = elapsedMilliseconds,
+                UserAgent = userAgent,
+                IpAddress = ipAddress,
+                Timestamp = DateTime.UtcNow
+            });
     }
 }

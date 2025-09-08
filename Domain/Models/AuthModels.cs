@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using Domain.Constants;
+using Domain.Models.User;
 
 namespace Domain.Models;
 

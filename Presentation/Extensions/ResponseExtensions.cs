@@ -23,7 +23,12 @@ public static class ResponseExtensions
     public static ResponseModel<List<T>> ToResponse<T>(this PaginatedList<T> paged)
     {
         return new ResponseModel<List<T>>(paged.Data,
-            new Pagination { Page = paged.PageNumber, PageSize = paged.PageSize, TotalCount = paged.TotalCount });
+            new Pagination
+            {
+                Page = paged.Page,
+                PageSize = paged.PageSize,
+                TotalCount = paged.TotalCount
+            });
     }
 
     public static ApiError ToApiError(this string message, string code = ErrorCodes.BadRequest, string? details = null)

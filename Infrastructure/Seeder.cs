@@ -34,10 +34,10 @@ public static class Seeder
     {
         var roles = new[]
         {
-            Roles.SuperAdmin,
-            Roles.Admin,
-            Roles.User,
-            Roles.Moderator
+            UserRoles.SuperAdmin,
+            UserRoles.Admin,
+            UserRoles.User,
+            UserRoles.Moderator
         };
 
         foreach (var roleName in roles)
@@ -65,7 +65,7 @@ public static class Seeder
             new
             {
                 Email = "superadmin@backend.net", Password = Pw("SEED_SUPER_ADMIN_PW", "SuperAdmin123!"),
-                Role = Roles.SuperAdmin
+                Role = UserRoles.SuperAdmin
             }
         };
 
@@ -97,12 +97,10 @@ public static class Seeder
             await context.SaveChangesAsync();
             logger?.LogInformation("Seeded user {Email} with role {Role}", userData.Email, userData.Role);
         }
+    }
 
-        return;
-
-        string Pw(string key, string fallback)
-        {
-            return Environment.GetEnvironmentVariable(key) ?? fallback;
-        }
+    private static string Pw(string key, string fallback)
+    {
+        return Environment.GetEnvironmentVariable(key) ?? fallback;
     }
 }
