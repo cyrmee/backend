@@ -3,7 +3,6 @@ using Domain.Interfaces;
 using Domain.Settings;
 using Infrastructure;
 using Infrastructure.Interceptors;
-using Infrastructure.Resilience;
 using Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
@@ -147,9 +146,6 @@ public static class ServiceCollectionExtensions
 
     private static IServiceCollection RegisterResilienceServices(IServiceCollection services)
     {
-        // Polly policies for resilient HTTP calls
-        services.AddSingleton<RetryPolicies>();
-
         return services;
     }
 
