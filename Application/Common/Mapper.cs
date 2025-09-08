@@ -22,7 +22,7 @@ namespace Application.Common;
 ///         Example:
 ///         <code>
 /// var model = new UserModel { Name = "Alice", Tags = new List&lt;string&gt; { "admin" } };
-/// var entity = Mapper.Map&lt;UserModel, User&gt;(model);
+/// var entity = Mapper.Map&lt;User&gt;(model);
 /// Mapper.Map(model, entity); // Merge
 /// </code>
 ///     </para>
@@ -52,7 +52,6 @@ public static class Mapper
     /// <summary>
     ///     Creates a new destination instance and maps values from source into it.
     /// </summary>
-    /// <typeparam name="TSource">Source type</typeparam>
     /// <typeparam name="TDestination">Destination type</typeparam>
     /// <param name="source">Source instance (can be null)</param>
     /// <param name="mergeOnly">If true, preserves existing collections without clearing</param>
@@ -61,7 +60,7 @@ public static class Mapper
     ///     Newly created and populated destination instance; default if source is null or destination cannot be
     ///     constructed.
     /// </returns>
-    public static TDestination Map<TSource, TDestination>(TSource source, bool mergeOnly = false, int maxDepth = 10)
+    public static TDestination MapTo<TDestination>(object source, bool mergeOnly = false, int maxDepth = 10)
     {
         if (Equals(source, null)) return default!;
 
@@ -77,13 +76,12 @@ public static class Mapper
     ///     Maps values from source into an existing destination instance. Keeps existing destination values when the source
     ///     property is null.
     /// </summary>
-    /// <typeparam name="TSource">Source type</typeparam>
     /// <typeparam name="TDestination">Destination type</typeparam>
     /// <param name="source">Source instance</param>
     /// <param name="destination">Destination instance</param>
     /// <param name="mergeOnly">If true, preserves existing collections without clearing</param>
     /// <param name="maxDepth">Maximum recursion depth (default 10)</param>
-    public static void Map<TSource, TDestination>(TSource source, TDestination destination, bool mergeOnly = false,
+    public static void MapTo<TDestination>(object source, TDestination destination, bool mergeOnly = false,
         int maxDepth = 10)
     {
         if (Equals(source, null) ||
@@ -559,9 +557,9 @@ public static class Mapper
     ///     mapping properties with matching (case-insensitive) names and compatible (assignable) simple types.
     ///     Complex and collection navigation properties are skipped. This allows server-side translation by EF.
     /// </summary>
-    public static IQueryable<TDestination> ProjectTo<TSource, TDestination>(this IQueryable<TSource> query)
+    public static IQueryable<TDestination> MapTo<TDestination>(this IQueryable query)
     {
-        var sourceType = typeof(TSource);
+        var sourceType = query.ElementType;
         var destType = typeof(TDestination);
 
         var sourceProps = sourceType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -583,8 +581,12 @@ public static class Mapper
         }
 
         var body = Expression.MemberInit(Expression.New(destType), bindings);
-        var lambda = Expression.Lambda<Func<TSource, TDestination>>(body, param);
-        return query.Select(lambda);
+        var lambda = Expression.Lambda(body, param);
+        var selectMethod = typeof(Queryable)
+            .GetMethods()
+            .First(m => m.Name == "Select" && m.GetParameters().Length == 2)
+            .MakeGenericMethod(sourceType, destType);
+        return (IQueryable<TDestination>)selectMethod.Invoke(null, [query, lambda])!;
     }
 
     private sealed class ReferenceEqualityComparer : IEqualityComparer<object>

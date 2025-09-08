@@ -15,133 +15,135 @@ using Microsoft.Extensions.Options;
 namespace Application.Services;
 
 public class AuthService(
-    UserManager<User> userManager,
-    IOptions<JwtSettings> jwtOptions,
-    ITokenStoreService tokenStore,
-    IJwtTokenService jwtTokenService,
-    ILogger<AuthService> logger
+	UserManager<User> userManager,
+	IOptions<JwtSettings> jwtOptions,
+	ITokenStoreService tokenStore,
+	IJwtTokenService jwtTokenService,
+	ILogger<AuthService> logger
 ) : IAuthService
 {
-    private readonly JwtSettings _jwt = jwtOptions.Value;
+	private readonly JwtSettings _jwt = jwtOptions.Value;
 
-    public async Task<JwtAuthResponseModel> RegisterAsync(RegisterModel model)
-    {
-        var existing = await userManager.FindByEmailAsync(model.Email);
-        if (existing != null)
-            throw new ConflictException("User with this email already exists");
+	public async Task<JwtAuthResponseModel> RegisterAsync(RegisterModel model)
+	{
+		var existing = await userManager.FindByEmailAsync(model.Email);
+		if (existing != null)
+			throw new ConflictException("User with this email already exists");
 
-        var user = Mapper.Map<RegisterModel, User>(model);
+		var user = Mapper.MapTo<User>(model);
 
-        var result = await userManager.CreateAsync(user, model.Password);
-        if (!result.Succeeded)
-        {
-            var error = string.Join(", ", result.Errors.Select(e => e.Description));
-            throw new BadRequestException($"Failed to register user: {error}");
-        }
+		var result = await userManager.CreateAsync(user, model.Password);
+		if (!result.Succeeded)
+		{
+			var error = string.Join(", ", result.Errors.Select(e => e.Description));
+			throw new BadRequestException($"Failed to register user: {error}");
+		}
 
-        await userManager.AddToRoleAsync(user, UserRoles.User);
-        await userManager.UpdateAsync(user);
+		await userManager.AddToRoleAsync(user, UserRoles.User);
 
-        return await CreateAuthResponseAsync(user);
-    }
+		user.LastLoginAt = DateTime.UtcNow;
+		await userManager.UpdateAsync(user);
 
-    public async Task<JwtAuthResponseModel> LoginAsync(LoginModel model)
-    {
-        var user = await userManager.FindByEmailAsync(model.Email)
-                   ?? throw new UnauthorizedException("Invalid credentials");
+		return await CreateAuthResponseAsync(user);
+	}
 
-        var passwordValid = await userManager.CheckPasswordAsync(user, model.Password);
-        if (!passwordValid)
-            throw new UnauthorizedException("Invalid credentials");
+	public async Task<JwtAuthResponseModel> LoginAsync(LoginModel model)
+	{
+		var user = await userManager.FindByEmailAsync(model.Email)
+		           ?? throw new UnauthorizedException("Invalid credentials");
 
-        user.LastLoginAt = DateTime.UtcNow;
-        await userManager.UpdateAsync(user);
+		var passwordValid = await userManager.CheckPasswordAsync(user, model.Password);
+		if (!passwordValid)
+			throw new UnauthorizedException("Invalid credentials");
 
-        return await CreateAuthResponseAsync(user, model.RememberMe);
-    }
+		user.LastLoginAt = DateTime.UtcNow;
+		await userManager.UpdateAsync(user);
 
-    public async Task<JwtAuthResponseModel> RefreshAccessTokenAsync(string refreshToken)
-    {
-        // Validate token and ensure type == refresh and jti exists in Redis
-        var principal = jwtTokenService.ValidateToken(refreshToken, validateLifetime: true);
+		return await CreateAuthResponseAsync(user, model.RememberMe);
+	}
 
-        var type = principal.Claims.FirstOrDefault(c => c.Type == JwtTokenTypes.TokenTypeClaim)?.Value;
-        var sub = principal.Claims
-            .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)?.Value;
-        var jti = principal.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
-        if (type != JwtTokenTypes.Refresh || string.IsNullOrEmpty(sub) || string.IsNullOrEmpty(jti))
-            throw new UnauthorizedException("Invalid refresh token");
+	public async Task<JwtAuthResponseModel> RefreshAccessTokenAsync(string refreshToken)
+	{
+		// Validate token and ensure type == refresh and jti exists in Redis
+		var principal = jwtTokenService.ValidateToken(refreshToken, validateLifetime: true);
 
-        var refreshKeyActive = await tokenStore.IsRefreshJtiActiveAsync(sub, jti);
-        if (!refreshKeyActive)
-            throw new UnauthorizedException("Refresh token not found or expired");
+		var type = principal.Claims.FirstOrDefault(c => c.Type == JwtTokenTypes.TokenTypeClaim)?.Value;
+		var sub = principal.Claims
+			.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)?.Value;
+		var jti = principal.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
+		if (type != JwtTokenTypes.Refresh || string.IsNullOrEmpty(sub) || string.IsNullOrEmpty(jti))
+			throw new UnauthorizedException("Invalid refresh token");
 
-        var user = await userManager.FindByIdAsync(sub)
-            ?? throw new UnauthorizedException("User not found");
+		var refreshKeyActive = await tokenStore.IsRefreshJtiActiveAsync(sub, jti);
+		if (!refreshKeyActive)
+			throw new UnauthorizedException("Refresh token not found or expired");
 
-        // rotate refresh token: delete old and create new
-        await tokenStore.RevokeRefreshJtiAsync(sub, jti);
-        return await CreateAuthResponseAsync(user);
-    }
+		var user = await userManager.FindByIdAsync(sub)
+		           ?? throw new UnauthorizedException("User not found");
 
-    public async Task LogoutAsync(LogoutModel model)
-    {
-        var sub = model.UserId;
-        if (!string.IsNullOrEmpty(model.RefreshToken))
-            try
-            {
-                var handler = new JwtSecurityTokenHandler();
-                var decoded = handler.ReadJwtToken(model.RefreshToken);
-                sub = decoded.Claims
-                          .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)
-                          ?.Value ??
-                      sub;
-                var jti = decoded.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
-                if (!string.IsNullOrEmpty(sub) && !string.IsNullOrEmpty(jti))
-                    await tokenStore.RevokeRefreshJtiAsync(sub, jti);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error occurred while logging out refresh token");
-            }
+		// rotate refresh token: delete old and create new
+		await tokenStore.RevokeRefreshJtiAsync(sub, jti);
+		return await CreateAuthResponseAsync(user);
+	}
 
-        if (!string.IsNullOrEmpty(model.AccessToken))
-            try
-            {
-                var handler = new JwtSecurityTokenHandler();
-                var decoded = handler.ReadJwtToken(model.AccessToken);
-                sub = decoded.Claims
-                          .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)
-                          ?.Value ??
-                      sub;
-                var jti = decoded.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
-                if (!string.IsNullOrEmpty(sub) && !string.IsNullOrEmpty(jti))
-                    await tokenStore.RevokeAccessJtiAsync(sub, jti);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error occurred while logging out access token");
-            }
-    }
+	public async Task LogoutAsync(LogoutModel model)
+	{
+		var sub = model.UserId;
+		if (!string.IsNullOrEmpty(model.RefreshToken))
+			try
+			{
+				var handler = new JwtSecurityTokenHandler();
+				var decoded = handler.ReadJwtToken(model.RefreshToken);
+				sub = decoded.Claims
+					      .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)
+					      ?.Value ??
+				      sub;
+				var jti = decoded.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
+				if (!string.IsNullOrEmpty(sub) && !string.IsNullOrEmpty(jti))
+					await tokenStore.RevokeRefreshJtiAsync(sub, jti);
+			}
+			catch (Exception ex)
+			{
+				logger.LogError(ex, "Error occurred while logging out refresh token");
+			}
 
-    public async Task LogoutAllSessionsAsync(string userId) =>
-        await tokenStore.RevokeAllForUserAsync(userId);
+		if (!string.IsNullOrEmpty(model.AccessToken))
+			try
+			{
+				var handler = new JwtSecurityTokenHandler();
+				var decoded = handler.ReadJwtToken(model.AccessToken);
+				sub = decoded.Claims
+					      .FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Sub or ClaimTypes.NameIdentifier)
+					      ?.Value ??
+				      sub;
+				var jti = decoded.Claims.FirstOrDefault(c => c.Type is JwtRegisteredClaimNames.Jti)?.Value;
+				if (!string.IsNullOrEmpty(sub) && !string.IsNullOrEmpty(jti))
+					await tokenStore.RevokeAccessJtiAsync(sub, jti);
+			}
+			catch (Exception ex)
+			{
+				logger.LogError(ex, "Error occurred while logging out access token");
+			}
+	}
 
-    private async Task<JwtAuthResponseModel> CreateAuthResponseAsync(User user, bool rememberMe = false)
-    {
-        var accessToken = await jwtTokenService.GenerateAccessToken(user);
+	public async Task LogoutAllSessionsAsync(string userId) =>
+		await tokenStore.RevokeAllForUserAsync(userId);
 
-        var refreshDays = rememberMe ? _jwt.RememberMeRefreshTokenExpirationDays : _jwt.RefreshTokenExpirationDays;
-        var refreshLifetime = TimeSpan.FromDays(refreshDays);
-        var refreshToken = await jwtTokenService.GenerateRefreshToken(user, refreshLifetime);
+	private async Task<JwtAuthResponseModel> CreateAuthResponseAsync(User user, bool rememberMe = false)
+	{
+		var accessToken = await jwtTokenService.GenerateAccessToken(user);
 
-        var authUserResponse = Mapper.Map<User, UserModel>(user);
+		var refreshDays = rememberMe ? _jwt.RememberMeRefreshTokenExpirationDays : _jwt.RefreshTokenExpirationDays;
+		var refreshLifetime = TimeSpan.FromDays(refreshDays);
+		var refreshToken = await jwtTokenService.GenerateRefreshToken(user, refreshLifetime);
 
-        return new JwtAuthResponseModel
-        {
-            AccessToken = accessToken,
-            RefreshToken = refreshToken,
-            User = authUserResponse
-        };
-    }
+		var authUserResponse = Mapper.MapTo<UserModel>(user);
+
+		return new JwtAuthResponseModel
+		{
+			AccessToken = accessToken,
+			RefreshToken = refreshToken,
+			User = authUserResponse
+		};
+	}
 }

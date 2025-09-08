@@ -1,5 +1,4 @@
 using Application.Common;
-using Domain.Entities;
 using Domain.Enums;
 using Domain.Interfaces;
 using Domain.Models.Common;
@@ -16,7 +15,7 @@ public class UserService(ApplicationDbContext context) : IUserService
 		var query = context.Users
 			.AsNoTracking()
 			.Where(u => u.Id == id)
-			.ProjectTo<User, UserModel>();
+			.MapTo<UserModel>();
 
 		var result = await query.FirstOrDefaultAsync(cancellationToken);
 
@@ -43,7 +42,7 @@ public class UserService(ApplicationDbContext context) : IUserService
 		var total = await usersQuery.CountAsync(cancellationToken);
 		var skip = (query.Page - 1) * query.PageSize;
 		var data = await usersQuery.Skip(skip).Take(query.PageSize)
-			.ProjectTo<User, UserModel>()
+			.MapTo<UserModel>()
 			.ToListAsync(cancellationToken);
 
 		return new PaginatedList<UserModel>
